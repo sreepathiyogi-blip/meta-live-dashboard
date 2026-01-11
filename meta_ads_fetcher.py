@@ -1,11 +1,9 @@
-"""
-Meta Ads Data Fetcher - October 1, 2025 to NOW + Continuous Updates
-Strategy: 
+""" Meta Ads Data Fetcher - October 1, 2025 to NOW + Continuous Updates
+Strategy:
 1. Fetch historical data: Oct 1, 2025 to Yesterday (one-time or when needed)
 2. Fetch today's data: Updates every 15 minutes
 3. Combine for complete dataset
 """
-
 import os
 import sys
 import requests
@@ -29,11 +27,12 @@ class Config:
     ]
     
     # IMPORTANT: Your historical start date
-    HISTORICAL_START_DATE = "2025-10-01"  # October 1, 2025
+    HISTORICAL_START_DATE = "2024-10-01"  # October 1, 2024
     
     API_VERSION = "v21.0"
     BASE_URL = f"https://graph.facebook.com/{API_VERSION}"
     IST = timezone(timedelta(hours=5, minutes=30))
+    
     REQUEST_TIMEOUT = 60
     MAX_RETRIES = 3
     RETRY_DELAY = 5
@@ -70,7 +69,6 @@ class MetaAdsAPI:
     def fetch_custom_date_range(self, account_id, since_date, until_date, level='campaign'):
         """
         Fetch data for CUSTOM date range (YOUR SPECIFIC DATES)
-        
         Args:
             account_id: Meta ad account ID
             since_date: Start date 'YYYY-MM-DD' (e.g., '2024-10-01')
@@ -92,8 +90,8 @@ class MetaAdsAPI:
             'access_token': self.access_token,
             'fields': fields,
             'time_range': json.dumps({
-                'since': since_date,   # FROM date
-                'until': until_date     # TO date
+                'since': since_date,  # FROM date
+                'until': until_date   # TO date
             }),
             'level': level,
             'time_increment': 1,  # Daily breakdown (each day = 1 row)
@@ -112,7 +110,7 @@ class MetaAdsAPI:
             else:
                 break
         
-        logger.info(f"    Fetched {len(all_data)} records from {since_date} to {until_date}")
+        logger.info(f"  Fetched {len(all_data)} records from {since_date} to {until_date}")
         return all_data
     
     def fetch_today(self, account_id, level='campaign'):
@@ -149,8 +147,7 @@ class MetaAdsAPI:
     
     def fetch_historical_to_yesterday(self, account_id, start_date, level='campaign'):
         """
-        Fetch from start_date to YESTERDAY
-        (Everything except today)
+        Fetch from start_date to YESTERDAY (Everything except today)
         """
         yesterday = (datetime.now(Config.IST) - timedelta(days=1)).strftime('%Y-%m-%d')
         logger.info(f"  📅 Fetching HISTORICAL: {start_date} to {yesterday}")
@@ -160,7 +157,6 @@ class MetaAdsAPI:
 # DATA PROCESSOR
 # ============================================
 class DataProcessor:
-    
     @staticmethod
     def extract_action_value(actions, action_type):
         if not actions:
@@ -188,6 +184,7 @@ class DataProcessor:
     @staticmethod
     def process_insights(raw_data, include_ad_details=True):
         records = []
+        
         for item in raw_data:
             spend = float(item.get('spend', 0))
             impressions = int(item.get('impressions', 0))
@@ -201,6 +198,7 @@ class DataProcessor:
             add_to_cart = DataProcessor.extract_action_value(actions, 'add_to_cart')
             initiate_checkout = DataProcessor.extract_action_value(actions, 'initiate_checkout')
             purchases = DataProcessor.extract_action_value(actions, 'offsite_conversion.fb_pixel_purchase')
+            
             revenue = DataProcessor.extract_action_revenue(action_values, 'offsite_conversion.fb_pixel_purchase')
             
             roas = revenue / spend if spend > 0 else 0
@@ -244,6 +242,7 @@ class DataProcessor:
         df = pd.DataFrame(records)
         if not df.empty and 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'])
+        
         return df
 
 # ============================================
@@ -294,18 +293,14 @@ def main():
         
         # Campaign level - Historical
         historical_campaigns = api.fetch_historical_to_yesterday(
-            account_id, 
-            start_date, 
-            level='campaign'
+            account_id, start_date, level='campaign'
         )
         all_historical_campaigns.extend(historical_campaigns)
         logger.info(f"    ✓ Historical Campaigns: {len(historical_campaigns)} records")
         
         # Ad level - Historical
         historical_ads = api.fetch_historical_to_yesterday(
-            account_id, 
-            start_date, 
-            level='ad'
+            account_id, start_date, level='ad'
         )
         all_historical_ads.extend(historical_ads)
         logger.info(f"    ✓ Historical Ads: {len(historical_ads)} records")
@@ -411,17 +406,24 @@ def main():
     # ========================================
     if all_today_campaigns:
         df_today = processor.process_insights(all_today_campaigns, include_ad_details=False)
+        
+        # FIX: Use timezone-aware datetime for comparison
+        start_date_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=Config.IST)
+        now_dt = datetime.now(Config.IST)
+        total_days = (now_dt - start_date_dt).days + 1
+        
         summary = {
-            'Last_Updated': datetime.now(Config.IST).strftime('%Y-%m-%d %H:%M:%S'),
+            'Last_Updated': now_dt.strftime('%Y-%m-%d %H:%M:%S'),
             'Data_Start_Date': start_date,
             'Data_End_Date': today,
-            'Total_Days': (datetime.now(Config.IST) - datetime.strptime(start_date, '%Y-%m-%d')).days + 1,
+            'Total_Days': total_days,
             'Today_Spend': round(df_today['Spend'].sum(), 2),
             'Today_Revenue': round(df_today['Revenue'].sum(), 2),
             'Today_Purchases': int(df_today['Purchases'].sum()),
             'Today_ROAS': round(df_today['Revenue'].sum() / df_today['Spend'].sum() if df_today['Spend'].sum() > 0 else 0, 2),
             'Total_Records': len(all_campaigns_combined)
         }
+        
         df_summary = pd.DataFrame([summary])
         df_summary.to_csv('live_summary.csv', index=False)
         logger.info(f"✅ live_summary.csv (1 row)")
@@ -432,7 +434,7 @@ def main():
     logger.info(f"\n📊 Summary:")
     logger.info(f"  • Start Date: {start_date}")
     logger.info(f"  • End Date: {today}")
-    logger.info(f"  • Total Days: {(datetime.now(Config.IST) - datetime.strptime(start_date, '%Y-%m-%d')).days + 1}")
+    logger.info(f"  • Total Days: {total_days}")
     logger.info(f"  • Campaign Records: {len(all_campaigns_combined)}")
     logger.info(f"  • Ad Records: {len(all_ads_combined)}")
     logger.info(f"\n⏰ Next update in 15 minutes (today's data will refresh)")
